@@ -1,56 +1,35 @@
 #!/usr/bin/env python3
-"""Function that uses the requests module to obtain the HTML content 
-of a particular URL and returns it
+"""Implementing a get_page function
 """
+import redis
 import requests
-import time
 from functools import wraps
-
-CACHE_EXPIRATION_TIME = 10  # seconds
-CACHE = {}
+from typing import Callable
 
 
-def cache(fn):
-    """_summary_
-
-    Args:
-        fn (function): _description_
-
-    Returns:
-        _type_: _description_
+def track_get_page(fn: Callable) -> Callable:
+    """ Decorator for get_page
     """
     @wraps(fn)
-    def wrapped(*args, **kwargs):
-        """_summary_
-
-        Returns:
-            _type_: _description_
+    def wrapper(url: str) -> str:
+        """ Wrapper that:
+            - check whether a url's data is cached
+            - tracks how many times get_page is called
         """
-        url = args[0]
-        if url in CACHE and CACHE[url]["timestamp"] + CACHE_EXPIRATION_TIME > \
-                time.time():
-            CACHE[url]["count"] += 1
-            return CACHE[url]["content"]
-        else:
-            content = fn(*args, **kwargs)
-            CACHE[url] = {"content": content,
-                          "timestamp": time.time(), "count": 1}
-            return content
-    return wrapped
+        client = redis.Redis()
+        client.incr(f'count:{url}')
+        cached_page = client.get(f'{url}')
+        if cached_page:
+            return cached_page.decode('utf-8')
+        response = fn(url)
+        client.set(f'{url}', response, 10)
+        return response
+    return wrapper
 
 
-@cache
+@track_get_page
 def get_page(url: str) -> str:
-    """_summary_
-
-    Args:
-        url (str): _description_
-
-    Returns:
-        str: _description_
+    """ Makes a http request to a given endpoint
     """
-    global count
-    # increment count
-    count += 1
     response = requests.get(url)
-    return response.content.decode('utf-8')
+    return response.text
